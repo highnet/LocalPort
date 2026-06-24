@@ -47,10 +47,19 @@ PLIST
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
 
 if [[ "${1:-}" == "--install" ]]; then
-    echo "==> Installing to /Applications"
-    rm -rf "/Applications/$APP"
-    cp -R "$APP" "/Applications/$APP"
-    echo "Installed /Applications/$APP"
+    DEST="/Applications/$APP"
+    echo "==> Installing to $DEST (in place)"
+    # Update contents in place so the bundle keeps the same path AND inode.
+    # This keeps the Dock's pinned reference resolving to the latest build.
+    mkdir -p "$DEST"
+    rsync -a --delete "$APP/" "$DEST/"
+    codesign --force --deep --sign - "$DEST" 2>/dev/null || true
+    # Remove the project-folder build artifact so Spotlight/Dock can never
+    # resolve LocalPort to a stale copy; /Applications is the only one.
+    rm -rf "$APP"
+    # Refresh the Dock so the pinned tile shows this build immediately.
+    killall Dock 2>/dev/null || true
+    echo "Installed $DEST (build $BUILD)"
 else
-    echo "Built $APP. Install with: ./make-app.sh --install"
+    echo "Built $APP (build $BUILD). Install with: ./make-app.sh --install"
 fi
