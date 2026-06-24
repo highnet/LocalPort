@@ -9,9 +9,6 @@ final class ServerStore: ObservableObject {
     @Published var search: String = ""
     /// nil = the "All" tab; otherwise a process name to narrow to.
     @Published var selectedProcess: String? = nil
-    @Published var autoRefresh: Bool = true {
-        didSet { restartTimer() }
-    }
 
     /// Seconds between automatic scans.
     let interval: TimeInterval = 3
@@ -20,7 +17,9 @@ final class ServerStore: ObservableObject {
 
     init() {
         refresh()
-        restartTimer()
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
     }
 
     var filtered: [ServerEntry] {
@@ -70,11 +69,4 @@ final class ServerStore: ObservableObject {
         }
     }
 
-    private func restartTimer() {
-        timer?.invalidate()
-        guard autoRefresh else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
-    }
 }

@@ -48,12 +48,6 @@ struct ContentView: View {
             }
             .buttonStyle(IconButtonStyle())
             .help("Refresh now")
-
-            Toggle("", isOn: $store.autoRefresh)
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .scaleEffect(0.7)
-                .help("Auto-refresh every \(Int(store.interval))s")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -152,9 +146,9 @@ struct ContentView: View {
     private var footer: some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(store.autoRefresh ? Theme.accent : Color.secondary)
+                .fill(Theme.accent)
                 .frame(width: 5, height: 5)
-            Text(store.autoRefresh ? "Live" : "Paused")
+            Text("Live")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Spacer()
