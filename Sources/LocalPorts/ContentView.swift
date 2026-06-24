@@ -4,20 +4,12 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject private var store: ServerStore
 
-    // Tab-strip scroll geometry, used to fade edges when tabs overflow.
-    @State private var tabViewportWidth: CGFloat = 0
-    @State private var tabContentWidth: CGFloat = 0
-    @State private var tabScrollOffset: CGFloat = 0
-    @State private var tabFocus: Int = 0   // index the arrow buttons page through
+    // AppKit-backed horizontal scroller for the tab strip (mouse-wheel aware).
+    @StateObject private var tabScroll = HScrollController()
 
-    static let allTabID = "\u{0}__ALL__"
-
-    private var canScrollLeading: Bool { -tabScrollOffset > 1 }
-    private var canScrollTrailing: Bool {
-        tabContentWidth - (-tabScrollOffset) > tabViewportWidth + 1
+    private var buildVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "dev"
     }
-
-    private var tabIDs: [String] { [Self.allTabID] + store.processGroups.map(\.name) }
 
     var body: some View {
         ZStack {
@@ -71,74 +63,43 @@ struct ContentView: View {
     // MARK: - Tab strip
 
     private var tabBar: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+        HScrollView(controller: tabScroll) {
+            HStack(spacing: 6) {
+                TabPill(
+                    label: "All",
+                    count: store.servers.count,
+                    selected: store.selectedProcess == nil
+                ) { store.selectedProcess = nil }
+
+                ForEach(store.processGroups, id: \.name) { group in
                     TabPill(
-                        label: "All",
-                        count: store.servers.count,
-                        selected: store.selectedProcess == nil
-                    ) { store.selectedProcess = nil }
-                    .id(Self.allTabID)
-
-                    ForEach(store.processGroups, id: \.name) { group in
-                        TabPill(
-                            label: Self.shortLabel(group.name),
-                            count: group.count,
-                            selected: store.selectedProcess == group.name
-                        ) { store.selectedProcess = group.name }
-                        .id(group.name)
-                    }
+                        label: Self.shortLabel(group.name),
+                        count: group.count,
+                        selected: store.selectedProcess == group.name
+                    ) { store.selectedProcess = group.name }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-                .background(GeometryReader { geo in
-                    Color.clear
-                        .preference(key: TabContentWidthKey.self, value: geo.size.width)
-                        .preference(key: TabOffsetKey.self,
-                                    value: geo.frame(in: .named("tabScroll")).minX)
-                })
             }
-            .coordinateSpace(name: "tabScroll")
-            .background(GeometryReader { geo in
-                Color.clear.preference(key: TabViewportWidthKey.self, value: geo.size.width)
-            })
-            .onPreferenceChange(TabContentWidthKey.self) { tabContentWidth = $0 }
-            .onPreferenceChange(TabOffsetKey.self) { offset in
-                tabScrollOffset = offset
-                // Keep the paging index anchored when scrolled to an end.
-                if !canScrollLeading { tabFocus = 0 }
-                if !canScrollTrailing { tabFocus = max(0, tabIDs.count - 1) }
-            }
-            .onPreferenceChange(TabViewportWidthKey.self) { tabViewportWidth = $0 }
-            .mask(edgeFadeMask)
-            .overlay(alignment: .leading) { scrollButton(.leading, proxy) }
-            .overlay(alignment: .trailing) { scrollButton(.trailing, proxy) }
-            .animation(.easeInOut(duration: 0.15), value: canScrollLeading)
-            .animation(.easeInOut(duration: 0.15), value: canScrollTrailing)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
         }
-    }
-
-    /// Pages the tab strip a couple of tabs in the given direction.
-    private func pageTabs(_ edge: HorizontalEdge, _ proxy: ScrollViewProxy) {
-        let ids = tabIDs
-        guard ids.count > 1 else { return }
-        let step = 2
-        tabFocus = max(0, min(ids.count - 1, tabFocus + (edge == .leading ? -step : step)))
-        withAnimation(.easeOut(duration: 0.25)) {
-            proxy.scrollTo(ids[tabFocus], anchor: .center)
-        }
+        .frame(height: 30)
+        .padding(.bottom, 3)
+        .mask(edgeFadeMask)
+        .overlay(alignment: .leading) { scrollButton(.leading) }
+        .overlay(alignment: .trailing) { scrollButton(.trailing) }
+        .animation(.easeInOut(duration: 0.15), value: tabScroll.canScrollLeading)
+        .animation(.easeInOut(duration: 0.15), value: tabScroll.canScrollTrailing)
     }
 
     /// Fades the tab content to transparent on whichever edge has more to show.
     private var edgeFadeMask: some View {
         let fade: CGFloat = 22
         return HStack(spacing: 0) {
-            LinearGradient(colors: [canScrollLeading ? .clear : .black, .black],
+            LinearGradient(colors: [tabScroll.canScrollLeading ? .clear : .black, .black],
                            startPoint: .leading, endPoint: .trailing)
                 .frame(width: fade)
             Color.black
-            LinearGradient(colors: [.black, canScrollTrailing ? .clear : .black],
+            LinearGradient(colors: [.black, tabScroll.canScrollTrailing ? .clear : .black],
                            startPoint: .leading, endPoint: .trailing)
                 .frame(width: fade)
         }
@@ -147,10 +108,10 @@ struct ContentView: View {
     /// A clickable arrow that scrolls the strip and signals more tabs exist.
     /// Works with any mouse, unlike a horizontal swipe gesture.
     @ViewBuilder
-    private func scrollButton(_ edge: HorizontalEdge, _ proxy: ScrollViewProxy) -> some View {
-        let show = edge == .leading ? canScrollLeading : canScrollTrailing
+    private func scrollButton(_ edge: HorizontalEdge) -> some View {
+        let show = edge == .leading ? tabScroll.canScrollLeading : tabScroll.canScrollTrailing
         if show {
-            Button { pageTabs(edge, proxy) } label: {
+            Button { tabScroll.page(edge == .leading ? -1 : 1) } label: {
                 Image(systemName: edge == .leading ? "chevron.left" : "chevron.right")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.primary)
@@ -240,6 +201,9 @@ struct ContentView: View {
             Text("Live")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+            Text(verbatim: "build \(buildVersion)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.tertiary)
             Spacer()
             if let updated = store.lastUpdated {
                 Text("Updated \(updated.formatted(date: .omitted, time: .standard))")
@@ -353,23 +317,6 @@ private struct ServerRow: View {
     private func open() {
         if let url = entry.url { NSWorkspace.shared.open(url) }
     }
-}
-
-// MARK: - Scroll geometry preference keys
-
-private struct TabContentWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private struct TabViewportWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private struct TabOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Tab pill
