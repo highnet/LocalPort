@@ -50,4 +50,4 @@ swift run
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
